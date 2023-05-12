@@ -293,12 +293,11 @@ function buildString(node, isSVGNamespaceElement, depth, kNdN,eBase,attrSetter) 
       DN: "[",
     };
     eBase = new ExtendedBases();
-    attrSetter = { attr: "", keys: "{", dynNodes:"{",dynamic:"{",dynCount:0,nonKeyed:1};
+    attrSetter = { attr: "", keys: "{", dynNodes:"",dynamic:"{",dynCount:0,nonKeyed:1};
   }
   if (typeof node.attr.key == "string") {
     var keyname = node.attr.key.split('"')[1]//.replace('"', "").trim();
     var isKeyed = !!keyname.length && /^[^0-9]/.test(keyname);
-    //console.log(keyname);
   }
 
   isSVGNamespaceElement =
@@ -410,7 +409,7 @@ function buildString(node, isSVGNamespaceElement, depth, kNdN,eBase,attrSetter) 
               //attrSetter.attr = `${attrSetter.attr}\nlet ${m}=${getNode(depth)},$${m};`;
             }
             v = v.replace("{", "").replace(/}$/, "");
-            if (/on[A-Z]\S+/.test(k)) {//Events
+            if (/^on[A-Z]\S+/.test(k)) {//Events
               k = k.replace(/^on/, "");
               k = k.charAt(0).toLowerCase() + k.replace(/^./, "");
               evc = `${evc}${k}:$${m},`
@@ -542,11 +541,11 @@ function buildString(node, isSVGNamespaceElement, depth, kNdN,eBase,attrSetter) 
     // delete node.attr.class;
     // delete node.attr.style;
     // kNdN.KN[keyname].htmlAttributes = node.attr;
-    // kNdN.KN = `${kNdN.KN}${JSON.stringify(keyname)}:{position:${JSON.stringify(
-    //   depth
-    // )},styleValue:${JSON.stringify(stylesObject)},classNames:${JSON.stringify(
-    //   classObject
-    // )},htmlAttributes:${htmlAttris}},`;
+    kNdN.KN = `${kNdN.KN}${JSON.stringify(keyname)}:{position:${JSON.stringify(
+      depth
+    )},styleValue:${JSON.stringify(stylesObject)},classNames:${JSON.stringify(
+      classObject
+    )},htmlAttributes:${htmlAttris}},`;
   }
 
   //attrSetter.keys = `${attrSetter.keys}`;
@@ -571,11 +570,11 @@ function buildString(node, isSVGNamespaceElement, depth, kNdN,eBase,attrSetter) 
             //   i,
             // ])}],${child_Rep}`
           );
-          //m = `_${eBase.getUniqueVar()}`
-          //attrSetter.attr = `${attrSetter.attr}\nlet ${m}=${getNode([...depth, i],ch_l)};`
-          //attrSetter.dynNodes = `${attrSetter.dynNodes}\n${m}=_$get(${m},_$dyn?_$dyn['${attrSetter.dynCount}']:${node.children[i].value},args,${attrSetter.dynCount},this);`;
-          attrSetter.dynNodes = `${attrSetter.dynNodes}'${attrSetter.dynCount}':${getNode([...depth, i],ch_l)},`
-          attrSetter.dynamic = `${attrSetter.dynamic}'${attrSetter.dynCount}':${node.children[i].value},`
+          m = `_${eBase.getUniqueVar()}`
+          attrSetter.attr = `${attrSetter.attr}\nlet ${m}=${getNode([...depth, i],ch_l)};`
+          attrSetter.dynNodes = `${attrSetter.dynNodes}\n${m}=_$get(${m},_$dyn?_$dyn['${attrSetter.dynCount}']:${node.children[i].value},args,${attrSetter.dynCount},this);`;
+          //attrSetter.dynNodes = `${attrSetter.dynNodes}${attrSetter.dynCount}:${getNode([...depth, i],ch_l)},`
+          attrSetter.dynamic = `${attrSetter.dynamic}'${attrSetter.dynCount}':${m},`
           attrSetter.dynCount++;
           // kNdN.DN = `${kNdN.DN}{position:${JSON.stringify([
           //   ...depth,
@@ -609,9 +608,9 @@ function buildString(node, isSVGNamespaceElement, depth, kNdN,eBase,attrSetter) 
     // kNdN.KN += "}";
    // s2 = `',{KN:${kNdN.KN},DN:${kNdN.DN}},_$t);`;
     //console.log(attrSetter.attr);
-    s2 = `',\nfunction(args,_$,_$ev,_$id){${attrSetter.attr}\n`
-      + `return [${attrSetter.keys}},${attrSetter.dynNodes}}]},`
-      + `${attrSetter.dynamic}length:${attrSetter.dynCount}}, this)`;
+    s2 = `',\nfunction(args,_$,_$ev,_$id,_$get,_$dyn){${attrSetter.attr}\n`
+      + `args = (this.state||this.sharedState)?undefined:[args]\n${attrSetter.dynNodes}\nreturn[${attrSetter.keys}},`
+      + `_$dyn ? null : ${attrSetter.dynamic} length:${attrSetter.dynCount}}]}, this)`;
    // s2+=`,\n${attrSetter.dynamic}length:${attrSetter.dynCount}},this)`
   }
   return s1 + nodeString.replace(`${child_Rep}`, "") + s2;

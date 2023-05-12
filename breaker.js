@@ -33,12 +33,14 @@
     var MountBucket = new Map();
     var TemplateBucket = new Map();
     var standAloneUpdates = new Map();
+    var listUpdates = new Map();
     var updates_initiated = false;
     var updating = false;
     var internal = Symbol();
     var internal_ins = Symbol();
     var dinstinctComponents = 0;
     var componentsID = 0;
+    var listCount = 0;
     var STATUS = {
         alive: 1,
         hibernated: 2,
@@ -54,19 +56,20 @@
         function Breaker() {
             this.ui = new UI();
         }
-        Breaker.prototype.create = function (htmlMethod, Setter, dynamicNodes, comp) {
+        Breaker.prototype.create = function (htmlMethod, Setter, comp) {
             var _internal_ = comp[internal];
             comp[internal] = null;
             var compClass = CreatedComponents.get(_internal_.fnId);
-            compClass.setup(htmlMethod, Setter, dynamicNodes, comp);
+            compClass.setup(htmlMethod, Setter, comp);
             var node = compClass.getTemplate();
             comp = Object.create(comp);
             comp[internal] = _internal_;
+            _internal_.dyn = {};
             Blocks.set(_internal_.id, comp);
             run(comp);
-            var kNdN = Setter.apply(comp, [_internal_.Args[0], node, eventHandler, _internal_.id]);
+            var kNdN = Setter.apply(comp, [_internal_.Args[0], node, eventHandler, _internal_.id, get, undefined]);
             _internal_.keyed = kNdN[0];
-            _internal_.init_dyn = kNdN[1];
+            compClass.dn = kNdN[1];
             return node;
             // return setAttributes(_internal_.id, compClass.kn, _internal_.keyed, comp.elements || {}, compClass.template.cloneNode(true));
         };
@@ -77,11 +80,12 @@
         var node = compClass.getTemplate();
         var comp = Object.create(compClass.proto);
         comp[internal] = _internal_;
+        _internal_.dyn = {};
         Blocks.set(_internal_.id, comp);
         run(comp);
-        var kNdN = compClass.setAttr.apply(comp, [_internal_.Args[0], node, eventHandler, _internal_.id]);
+        var kNdN = compClass.setAttr.apply(comp, [_internal_.Args[0], node, eventHandler, _internal_.id, get, compClass.dn]);
         _internal_.keyed = kNdN[0];
-        _internal_.init_dyn = kNdN[1];
+        //_internal_.init_dyn = kNdN[1];
         return node;
         //return setAttributes(_internal_.id, compClass.kn, _internal_.keyed, comp.elements || {}, compClass.template.cloneNode(true));
     }
@@ -95,7 +99,70 @@
         if (t.public) {
             t.public = t.public.apply(t, args);
         }
+        // t.onCreation = undefined;
     }
+    var get = function get(node, dynNode, args, i, comp) {
+        //var l = classDyn.length;
+        // if (l) {
+        // const comp = Blocks.get(id);
+        var _internal_ = comp[internal];
+        var id = _internal_.id;
+        var dyn = _internal_.dyn;
+        // const dn = classDyn;
+        //const Args = (comp.state || comp.sharedState) ? undefined : _internal_.Args;
+        var value, el;
+        //for (i = 0; i < l; i++){
+        renderingComponent.id = id;
+        renderingComponent.dynIndex = i;
+        value = dynNode.apply(comp, args);
+        switch (typeof value) {
+            case "object":
+                if (value) {
+                    if ((el = value[internal])) {
+                        if (el.type == NODETYPES.list) {
+                            //lc = el.nextData;
+                            // if ((value = el.curData.length)) {
+                            //     node.replaceWith(insertList(el, { i: i, id: id, getList: el.getList }, undefined));
+                            // }
+                            // else {
+                            // el.data.parent = id;
+                            // value = el.pos;
+                            // getNode(node, dn[i].position).replaceWith((value.head = value.tail = document.createTextNode("")));
+                            node.replaceWith(insertList(el, { i: i, id: id }, undefined));
+                            // }
+                            // el.curData = lc;
+                            // el.nextData = undefined;
+                        }
+                        else {
+                            node.replaceWith(el.node);
+                            el.parent = id;
+                            el.dynIndex = i;
+                        }
+                        dyn[i] = el;
+                        break;
+                    }
+                }
+                else {
+                    value = "";
+                }
+            default:
+                value = "".concat(value);
+                el = document.createTextNode(value);
+                node.replaceWith(el);
+                dyn[i] = { node: el, type: NODETYPES.text, value: value };
+                break;
+        }
+        //}
+        // l = pairs.length;
+        // for (i = 0; i < l; i++){
+        //     value = pairs[i];
+        //     value[0].replaceWith(value[1]);
+        // }
+        renderingComponent.id = undefined;
+        renderingComponent.dynIndex = undefined;
+        // }
+        return dynNode;
+    };
     var UI = /** @class */ (function () {
         function UI() {
         }
@@ -159,8 +226,8 @@
                     _internal_.status = STATUS.alive;
                     //listTrack = listTracker;
                     //listTracker = _internal_.id;
-                    runDynamicnodes(_internal_.id, compClass.dn, _internal_.init_dyn);
-                    _internal_.init_dyn = null;
+                    // runDynamicnodes(_internal_.id, compClass.dn, _internal_.init_dyn);
+                    // _internal_.init_dyn = null;
                     //listTracker = listTrack;
                     return out;
                 case STATUS.alive: //Update
@@ -284,12 +351,17 @@
             }
         });
         standAloneUpdates.clear();
+        listUpdates.forEach(function (value) {
+            var parentData = { id: value.pos.parent, i: value.pos.dynIndex };
+            updateList(value, parentData, undefined);
+        });
+        listUpdates.clear();
         updating = updates_initiated = false;
     }
     var ComponentClass = /** @class */ (function () {
         function ComponentClass(fn) {
             this.template = undefined;
-            this.dn = [];
+            this.dn = undefined;
             //kn: { [k: string]: KeyedNode } = {};
             this.fn = undefined;
             this.id = 0;
@@ -300,8 +372,8 @@
             dinstinctComponents++;
             this.id = dinstinctComponents;
         }
-        ComponentClass.prototype.setup = function (htmlMethod, setter, dn, proto) {
-            this.dn = dn;
+        ComponentClass.prototype.setup = function (htmlMethod, setter, proto) {
+            //this.dn = dn;
             this.proto = proto;
             this.html = htmlMethod;
             this.setAttr = setter;
@@ -342,14 +414,15 @@
             this.parent = 0;
             this.id = 0;
             this.fnId = 0;
+            this.dyn = {};
             this.Args = undefined;
             this.InitArgs = undefined;
             this.init_dyn = undefined;
             this.keyed = null;
             componentsID++;
             this.id = componentsID;
-            var f = this.outerValue[internal];
-            f.id = componentsID;
+            var b = this.outerValue[internal];
+            b.id = componentsID;
             this.fnId = methodId;
             this.Args = args;
             this.InitArgs = initArgs;
@@ -357,7 +430,7 @@
             a.fnId = methodId;
             ;
             a.id = componentsID;
-            a.out = f;
+            a.out = b;
         }
         return ComponentInstance;
     }());
@@ -383,11 +456,14 @@
                     dynIndex: undefined,
                     parent: undefined
                 },
-                runner: { fn: undefined, data: undefined }
+                runner: { fn: undefined, data: undefined },
+                id: 0
             };
             var a = this[internal];
             //a.pos.parent = boundedParentId;
             a.curData = list.map(getListItem);
+            listCount++;
+            a.id = listCount;
         }
         // map<U>(fn: (value: T, index: number, array: T[]) => U, thisArg?: any): U[];
         List.prototype.map = function (data, fn, thisArg) {
@@ -417,6 +493,11 @@
             var t = to - from + 1;
             _internal_.length = l - t;
             _internal_.stack.push({ type: "remove", from: from, to: to, total: t });
+            listUpdates.set(_internal_.id, _internal_);
+            if (!updates_initiated) {
+                updates_initiated = true;
+                setTimeout(update, 0);
+            }
         };
         List.prototype.insertBefore = function (index, listData, args) {
             var _internal_ = this[internal];
@@ -443,6 +524,11 @@
             }
             _internal_.length = l + t;
             _internal_.stack.push({ type: "insert", value: value, before: bf, args: args });
+            listUpdates.set(_internal_.id, _internal_);
+            if (!updates_initiated) {
+                updates_initiated = true;
+                setTimeout(update, 0);
+            }
         };
         List.prototype.size = function () {
             return this[internal].length;
@@ -677,56 +763,15 @@
                 switch (item.type) {
                     case "remove":
                         //if (!removed) {
-                        a = item.total;
-                        t = item.from;
-                        b = item.to;
-                        if (d == a) {
-                            //j = 0;
-                            for (j = 1; j < a; j++) {
-                                //tmp = head.nextSibling;
-                                head.nextSibling.remove();
-                                //head = tmp;
-                                if ((el = data[j][internal_ins])) {
-                                    el = el.out; //Blocks.get(el.id)[internal].outerValue[internal];
-                                    el.parent = 0;
-                                    el.dynIndex = 0;
-                                    el.listItem = false;
-                                    el.getList = undefined;
-                                    componentsTrashBin.add(el);
-                                }
-                            }
-                            // while (head!=tail) {
-                            //     tmp = head.nextSibling;
-                            //     head.remove();
-                            //     head = tmp;
-                            //     if ((el = data[j][internal_ins])) {
-                            //         el = el.out;//Blocks.get(el.id)[internal].outerValue[internal];
-                            //         el.parent = 0;
-                            //         el.dynIndex = 0;
-                            //         el.listItem = false;
-                            //         el.getList = undefined;
-                            //         componentsTrashBin.add(el)
-                            //     }
-                            //     j++;
-                            // }
-                            //
-                            list.pos.tail = list.pos.head = head;
-                        }
-                        else {
-                            if (t - 0 < d - b) {
-                                for (j = 0; j < t; j++) {
-                                    head = head.nextSibling;
-                                }
-                                //If the current tail node must be removed,
-                                //then the next tail node is the previousSibling
-                                //of the `from` node
-                                if (d - 1 == b) {
-                                    list.pos.tail = head.previousSibling;
-                                }
-                                for (; j <= b; j++) {
-                                    tmp = head.nextSibling;
-                                    head.remove();
-                                    head = tmp;
+                            a = item.total;
+                            t = item.from;
+                            b = item.to;
+                            if (d == a) {
+                                //j = 0;
+                                for (j = 1; j < a; j++) {
+                                    //tmp = head.nextSibling;
+                                    head.nextSibling.remove();
+                                    //head = tmp;
                                     if ((el = data[j][internal_ins])) {
                                         el = el.out; //Blocks.get(el.id)[internal].outerValue[internal];
                                         el.parent = 0;
@@ -736,73 +781,114 @@
                                         componentsTrashBin.add(el);
                                     }
                                 }
-                                // while (j<=b) {
+                                // while (head!=tail) {
                                 //     tmp = head.nextSibling;
                                 //     head.remove();
                                 //     head = tmp;
                                 //     if ((el = data[j][internal_ins])) {
-                                //         el = Blocks.get(el.id)[internal].outerValue[internal];
+                                //         el = el.out;//Blocks.get(el.id)[internal].outerValue[internal];
                                 //         el.parent = 0;
                                 //         el.dynIndex = 0;
                                 //         el.listItem = false;
                                 //         el.getList = undefined;
-                                //         componentsTrashBin.add(el);
+                                //         componentsTrashBin.add(el)
                                 //     }
                                 //     j++;
                                 // }
-                                //If the current head node must be removed,
-                                //then the next head node is the nextSibling of 
-                                // the `to` node
-                                if (t == 0) {
-                                    list.pos.head = head;
-                                }
+                                //
+                                list.pos.tail = list.pos.head = head;
                             }
                             else {
-                                for (j = d - 1; j > b; j--) {
-                                    tail = tail.previousSibling;
-                                }
-                                //If the current head node must be removed,
-                                //then the next head node is the nextSibling of 
-                                // the `to` node
-                                if (t == 0) {
-                                    list.pos.tail = tail.nextSibling;
-                                }
-                                for (; j >= t; j--) {
-                                    tmp = tail.previousSibling;
-                                    tail.remove();
-                                    tail = tmp;
-                                    if ((el = data[j][internal_ins])) {
-                                        el = el.out; //Blocks.get(el.id)[internal].outerValue[internal];
-                                        el.parent = 0;
-                                        el.dynIndex = 0;
-                                        el.listItem = false;
-                                        el.getList = undefined;
-                                        componentsTrashBin.add(el);
+                                if (t - 0 < d - b) {
+                                    for (j = 0; j < t; j++) {
+                                        head = head.nextSibling;
+                                    }
+                                    //If the current tail node must be removed,
+                                    //then the next tail node is the previousSibling
+                                    //of the `from` node
+                                    if (d - 1 == b) {
+                                        list.pos.tail = head.previousSibling;
+                                    }
+                                    for (; j <= b; j++) {
+                                        tmp = head.nextSibling;
+                                        head.remove();
+                                        head = tmp;
+                                        if ((el = data[j][internal_ins])) {
+                                            el = el.out; //Blocks.get(el.id)[internal].outerValue[internal];
+                                            el.parent = 0;
+                                            el.dynIndex = 0;
+                                            el.listItem = false;
+                                            el.getList = undefined;
+                                            componentsTrashBin.add(el);
+                                        }
+                                    }
+                                    // while (j<=b) {
+                                    //     tmp = head.nextSibling;
+                                    //     head.remove();
+                                    //     head = tmp;
+                                    //     if ((el = data[j][internal_ins])) {
+                                    //         el = Blocks.get(el.id)[internal].outerValue[internal];
+                                    //         el.parent = 0;
+                                    //         el.dynIndex = 0;
+                                    //         el.listItem = false;
+                                    //         el.getList = undefined;
+                                    //         componentsTrashBin.add(el);
+                                    //     }
+                                    //     j++;
+                                    // }
+                                    //If the current head node must be removed,
+                                    //then the next head node is the nextSibling of 
+                                    // the `to` node
+                                    if (t == 0) {
+                                        list.pos.head = head;
                                     }
                                 }
-                                // while (j>=t) {
-                                //     tmp = tail.previousSibling;
-                                //     tail.remove();
-                                //     tail = tmp;
-                                //     if ((el = data[j][internal_ins])) {
-                                //         el = Blocks.get(el.id)[internal].outerValue[internal];
-                                //         el.parent = 0;
-                                //         el.dynIndex = 0;
-                                //         el.listItem = false;
-                                //         el.getList = undefined;
-                                //         componentsTrashBin.add(el);
-                                //     }
-                                //     j--;
-                                // }
-                                //If the current tail node must be removed,
-                                //then the next tail node is the previousSibling
-                                //of the `from` node
-                                if (d - 1 == b) {
-                                    list.pos.tail = tail;
+                                else {
+                                    for (j = d - 1; j > b; j--) {
+                                        tail = tail.previousSibling;
+                                    }
+                                    //If the current head node must be removed,
+                                    //then the next head node is the nextSibling of 
+                                    // the `to` node
+                                    if (t == 0) {
+                                        list.pos.tail = tail.nextSibling;
+                                    }
+                                    for (; j >= t; j--) {
+                                        tmp = tail.previousSibling;
+                                        tail.remove();
+                                        tail = tmp;
+                                        if ((el = data[j][internal_ins])) {
+                                            el = el.out; //Blocks.get(el.id)[internal].outerValue[internal];
+                                            el.parent = 0;
+                                            el.dynIndex = 0;
+                                            el.listItem = false;
+                                            el.getList = undefined;
+                                            componentsTrashBin.add(el);
+                                        }
+                                    }
+                                    // while (j>=t) {
+                                    //     tmp = tail.previousSibling;
+                                    //     tail.remove();
+                                    //     tail = tmp;
+                                    //     if ((el = data[j][internal_ins])) {
+                                    //         el = Blocks.get(el.id)[internal].outerValue[internal];
+                                    //         el.parent = 0;
+                                    //         el.dynIndex = 0;
+                                    //         el.listItem = false;
+                                    //         el.getList = undefined;
+                                    //         componentsTrashBin.add(el);
+                                    //     }
+                                    //     j--;
+                                    // }
+                                    //If the current tail node must be removed,
+                                    //then the next tail node is the previousSibling
+                                    //of the `from` node
+                                    if (d - 1 == b) {
+                                        list.pos.tail = tail;
+                                    }
                                 }
                             }
-                        }
-                        data = __spreadArray(__spreadArray([], data.slice(0, t), true), data.slice(b + 1), true);
+                            data = __spreadArray(__spreadArray([], data.slice(0, t), true), data.slice(b + 1), true);
                         //}
                         //stack[i] = null;
                         //afterRem = data;
@@ -816,7 +902,6 @@
                         else {
                             data = __spreadArray(__spreadArray(__spreadArray([], data.slice(0, a), true), item.value, true), data.slice(a), true);
                         }
-                        
                         b = item.value;
                         if (args = item.args) {
                             t = b.length;
@@ -834,7 +919,6 @@
                             head.replaceWith(tmp);
                         }
                         else {
-                           
                             if (a - 0 <= d - a) {
                                 head = list.pos.head;
                                 if (a == 0) {
@@ -1044,7 +1128,7 @@
             var dyn = _internal_.dyn; // = new Array(l);
             var dn = compClass.dn;
             var Args = (comp.state || comp.sharedState) ? undefined : _internal_.Args;
-            var value, el, pairs = [], docF, lc, j, e, ar, i, tmp, tmp2, blc;
+            var value, el, e, i, tmp;
             var head, tail, bn;
             for (i = 0; i < l; i++) {
                 renderingComponent.id = id;
@@ -1299,8 +1383,8 @@
         _internal_.status = STATUS.alive;
         // var listTrack = listTracker;
         // listTracker = id;
-        runDynamicnodes(_internal_.id, compClass.dn, _internal_.init_dyn);
-        _internal_.init_dyn = null;
+        // runDynamicnodes(_internal_.id, compClass.dn, _internal_.init_dyn);
+        // _internal_.init_dyn = null;
         //listTracker = listTrack;
         //
         return out;
@@ -1357,3 +1441,4 @@
     var B = new Breaker();
     Object.defineProperty(window, "Breaker", { value: B, configurable: false, enumerable: true, writable: false });
 }();
+
